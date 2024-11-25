@@ -1,0 +1,977 @@
+#include <U8g2lib.h>
+#include "RotaryEncoder.h"
+#include <EEPROM.h>
+// Підключення дисплея
+U8G2_ST7565_ERC12864_F_4W_SW_SPI u8g2(U8G2_R0, /* clock=*/ 13, /* data=*/ 11, /* cs=*/ 10, /* dc=*/ 9, /* reset=*/ 8);
+
+// Підключення енкодера
+RotaryEncoder encoder(A2, A3);  // Піни енкодера (DT, CLK)
+const int buttonPin = 22;        // Кнопка енкодера
+int pos;
+static int newPos = 0;  // задаем начальное положение энкодера
+
+
+
+// Головне меню
+const char* mainMenu[] = {"Старт", "Налаштування", "Ручний"};
+int mainMenuSize = 3;
+
+// Підменю "Налаштування"
+const char* setingMenu[] = {"НАЛАШТУВАННЯ", "Температура", "Вентилятор", "Шнек", "Подача", "Колоснік", "Чистка теплообм."};
+int setingMenuSize = 7;
+
+
+// Створюємо буфери для рядків
+
+// Масив даних підменю
+// Підменю "Вентилятор"
+const char* fanMenu[] = {"ВЕНТИЛЯТОР", "Макс. оберти", "Мін. оберти"};
+int fanMenuSize = 3;
+int maxRound = 21;
+int minRound = 20;
+bool changeMaxRound = false;  // Чи знаходимось у режимі редагування
+bool changeMinRound = false;  // Чи знаходимось у режимі редагування
+ 
+// Підменю "Температура"
+const char* temperaturMenu[] = {"ТЕМПЕРАТУРА", "Температура"};
+int temperaturMenuSize = 2;
+int temperatur = 21;
+bool changeTemperatur = false;  // Чи знаходимось у режимі редагування
+
+
+// Підменю "Подача бункера"
+const char* shnekMenu[] = {"ШНЕК", "Затр. подачі", "Макс. Ток", "Час реверс", "Спроб реверс"};
+int shnekMenuSize = 5;
+bool changeWaitFeed = false;  // Чи знаходимось у режимі редагування
+bool changeMaxTok1 = false;  // Чи знаходимось у режимі редагування
+bool changeReversTime1 = false;  // Чи знаходимось у режимі редагування
+bool changeReversAttempts1 = false;  // Чи знаходимось у режимі редагування
+int waitFeed = 21;
+int maxTok1 = 21;
+int reversTime1 = 21;
+int reversAttempts1 = 21;
+
+// Підменю "Подача "
+const char* feedMenu[] = {"ПОДАЧА", "Час фітіль", "Пауза фітіль", "Час подачі", "Пауза подачі", "Макс. Ток", "Час реверс", "Спроб реверс"};
+int feedMenuSize = 8;
+bool changeFitilTime = false;  // Чи знаходимось у режимі редагування
+bool changeFitilWaitTime = false;  // Чи знаходимось у режимі редагування
+bool changeFeedTime = false;  // Чи знаходимось у режимі редагування
+bool changeWaitFeedTime = false;  // Чи знаходимось у режимі редагування
+bool changeMaxTok2 = false;  // Чи знаходимось у режимі редагування
+bool changeReversTime2 = false;  // Чи знаходимось у режимі редагування
+bool changeReversAttempts2 = false;  // Чи знаходимось у режимі редагування
+int settings[7] = {21, 22, 23, 24, 25, 26, 27};
+int settingsSize = 7;
+// Індекси масиву для кожної змінної:
+int fitilTime = settings[0];
+int fitilWaitTime = settings[1];
+int feedTime = settings[2];
+int waitFeedTime = settings[3];
+int maxTok2 = settings[4];
+int reversTime2 = settings[5];
+int reversAttempts2 = settings[6];
+
+// Підменю "колосніка "
+const char* kolosMenu[] = {"КОЛОСНІК", "Вкл. через", "Час руху", "Макс. Ток"};
+int kolosMenuSize = 4;
+bool changeOnThrough = false;  // Чи знаходимось у режимі редагування
+bool changeMovingTime = false;  // Чи знаходимось у режимі редагування
+bool changeMaxTok3 = false;  // Чи знаходимось у режимі редагування
+int onThrough = 21;
+int movingTime = 21;
+int maxTok3 = 21;
+
+
+// Підменю "чистка теплообміниика "
+const char* cleaningMenu[] = {"ЧИСТКА ТЕПЛОБМ.", "Вкл. 1", "Вкл. 2", "Вкл. 3", "Час чистки", "Макс. Ток"};
+int cleaningMenuSize = 6;
+bool changeOn1 = false;  // Чи знаходимось у режимі редагування
+bool changeOn2 = false;  // Чи знаходимось у режимі редагування
+bool changeOn3 = false;  // Чи знаходимось у режимі редагування
+bool changeCleaningTime = false;  // Чи знаходимось у режимі редагування
+bool changeMaxTok4 = false;  // Чи знаходимось у режимі редагування
+int settings2[5] = {21, 22, 23, 24, 25};
+int settingsSize2 = 5;
+// Індекси масиву для кожної змінної:
+int on1 = settings2[0];
+int on2 = settings2[1];
+int on3 = settings2[2];
+int cleaningTime = settings2[3];
+int maxTok4 = settings2[4];
+
+
+int currentMenu = 0;       // Позиція в меню
+int firstVisibleItem = 0;  // Перший видимий елемент (для прокрутки)
+const int visibleItemsCount = 5;  // Кількість видимих пунктів у меню
+int inSubMenu = 1;    // Чи ми у підменю
+int whichMenuNow;
+unsigned long lastDebounceTime = 0;  // Для debounce кнопки
+const unsigned long debounceDelay = 300;  // Затримка debounce
+
+int protect1;
+int protect2;
+
+int address1 = 1;
+int address2 = 5;
+int address3 = 10;
+int address4 = 15;
+int address5 = 20;
+int address6 = 25;
+int address7 = 30;
+int address9 = 35;
+int address10 = 40;
+int address11 = 45;
+int address12 = 50;
+int address13 = 55;
+int eepromAddress1 = 60;
+int eepromAddress2 = 90;
+int address8 = 120;
+void setup() {
+  Serial.begin(9600);
+  u8g2.begin();
+    loadFromEEPROM();
+  pinMode(buttonPin, INPUT_PULLUP);
+  u8g2.enableUTF8Print(); 
+  u8g2.setFont(u8g2_font_7x13_t_cyrillic);
+  displayMenu();
+  u8g2.setContrast (0);
+
+}
+
+void loop() {
+  encoder.tick();
+  newPos = encoder.getPosition();
+  Serial.println(newPos);
+
+  if (inSubMenu == 1) {
+    whichMenuNow = mainMenuSize;
+  } else if (inSubMenu == 2) {
+    whichMenuNow = setingMenuSize;
+  }else if (inSubMenu == 3) {
+    whichMenuNow = temperaturMenuSize;
+  }else if (inSubMenu == 4) {
+    whichMenuNow = fanMenuSize;
+  }else if (inSubMenu == 5) {
+    whichMenuNow = shnekMenuSize;
+  }else if (inSubMenu == 6) {
+    whichMenuNow = feedMenuSize;
+  }else if (inSubMenu == 7) {
+    whichMenuNow = kolosMenuSize;
+  }else if (inSubMenu == 8) {
+    whichMenuNow = cleaningMenuSize;
+  }
+
+   if (!changeMaxRound && !changeMinRound && !changeTemperatur && !changeWaitFeed && !changeMaxTok1 && !changeReversTime1 && !changeReversAttempts1 && !changeFitilTime && !changeFitilWaitTime && !changeFeedTime && !changeWaitFeedTime && !changeMaxTok2 && !changeReversTime2 && !changeReversAttempts2 && !changeOnThrough && !changeMovingTime && !changeMaxTok3 && !changeOn1 && !changeOn2 && !changeOn3 && !changeCleaningTime && !changeMaxTok4) {
+    // Якщо ми не в режимі редагування — переміщуємось по меню
+    if (newPos != currentMenu) {
+      currentMenu = (newPos % whichMenuNow + whichMenuNow) % whichMenuNow; 
+    updateVisibleItems();
+    displayMenu();
+    }
+   }
+
+
+
+  if (digitalRead(buttonPin) == LOW && (millis() - lastDebounceTime > debounceDelay)) {
+    lastDebounceTime = millis();  // Оновлюємо час debounce
+    handleMenuSelection();  // Логіка переходу між підменю
+    displayMenu();
+  }
+
+
+  encoder.tick();
+  newPos = encoder.getPosition();
+
+  if (changeMaxRound) {
+    protect1 = maxRound;
+    protect1 = encoder.getPosition();  // Прокрутка енкодера змінює значення
+   if (protect1 <= minRound) {
+   }else{
+    maxRound = protect1;
+   }
+  if (maxRound >= 100) {
+    maxRound = 100;
+    encoder.setPosition(100);
+  }
+    displayMenu();
+  }
+
+  if (changeMinRound) {
+    protect2 = minRound;
+    protect2 = encoder.getPosition();  // Прокрутка енкодера змінює значення
+    if (protect2 >= maxRound) {
+   }else{
+    minRound = protect2;
+   }
+  if (minRound <= 1) {
+    minRound = 1;
+    encoder.setPosition(1);
+  } 
+    displayMenu();
+  }
+
+  if (changeTemperatur) {
+    temperatur = encoder.getPosition();
+    if (temperatur <= 1) {
+      temperatur = 1;
+      encoder.setPosition(1);
+    } 
+    if (temperatur >= 100) {
+      temperatur = 100;
+      encoder.setPosition(100);
+    }
+    displayMenu();
+  }
+
+  if (changeWaitFeed) {
+    waitFeed = encoder.getPosition();
+    if (waitFeed <= 1) {
+      waitFeed = 1;
+      encoder.setPosition(1);
+    } 
+    if (waitFeed >= 100) {
+      waitFeed = 100;
+      encoder.setPosition(100);
+    }
+    displayMenu();
+  }
+
+  if (changeMaxTok1) {
+    maxTok1 = encoder.getPosition();
+    if (maxTok1 <= 1) {
+      maxTok1 = 1;
+      encoder.setPosition(1);
+    } 
+    if (maxTok1 >= 100) {
+      maxTok1 = 100;
+      encoder.setPosition(100);
+    }
+    displayMenu();
+  }
+
+  if (changeReversTime1) {
+    reversTime1 = encoder.getPosition();
+    if (reversTime1 <= 1) {
+      reversTime1 = 1;
+      encoder.setPosition(1);
+    } 
+    if (reversTime1 >= 100) {
+      reversTime1 = 100;
+      encoder.setPosition(100);
+    }
+    displayMenu();
+  }
+
+  if (changeReversAttempts1) {
+    reversAttempts1 = encoder.getPosition();
+    if (reversAttempts1 <= 1) {
+      reversAttempts1 = 1;
+      encoder.setPosition(1);
+    } 
+    if (reversAttempts1 >= 100) {
+      reversAttempts1 = 100;
+      encoder.setPosition(100);
+    }
+    displayMenu();
+  }
+
+  if (changeFitilTime) {
+    fitilTime = encoder.getPosition();
+    settings[0] = fitilTime;
+    if (settings[0] <= 1) {
+      settings[0] = 1;
+      encoder.setPosition(1);
+    } 
+    if (settings[0] >= 100) {
+      settings[0] = 100;
+      encoder.setPosition(100);
+    }
+    displayMenu();
+  }
+
+  if (changeFitilWaitTime) {
+    fitilWaitTime = encoder.getPosition();
+    settings[1] = fitilWaitTime;
+    if (settings[1] <= 1) {
+      settings[1] = 1;
+      encoder.setPosition(1);
+    } 
+    if (settings[1] >= 100) {
+      settings[1] = 100;
+      encoder.setPosition(100);
+    }
+    displayMenu();
+  }
+
+  if (changeFeedTime) {
+    feedTime = encoder.getPosition();
+    settings[2] = feedTime;
+    if (settings[2] <= 1) {
+      settings[2] = 1;
+      encoder.setPosition(1);
+    } 
+    if (settings[2] >= 100) {
+      settings[2] = 100;
+      encoder.setPosition(100);
+    }
+    displayMenu();
+  }
+
+  if (changeWaitFeedTime) {
+    waitFeedTime = encoder.getPosition();
+    settings[3] = waitFeedTime;
+    if (settings[3] <= 1) {
+      settings[3] = 1;
+      encoder.setPosition(1);
+    } 
+    if (settings[3] >= 100) {
+      settings[3] = 100;
+      encoder.setPosition(100);
+    }
+    displayMenu();
+  }
+
+  if (changeMaxTok2) {
+    maxTok2 = encoder.getPosition();
+    settings[4] = maxTok2;
+    if (settings[4] <= 1) {
+      settings[4] = 1;
+      encoder.setPosition(1);
+    } 
+    if (settings[4] >= 100) {
+      settings[4] = 100;
+      encoder.setPosition(100);
+    }
+    displayMenu();
+  }
+
+  if (changeReversTime2) {
+    reversTime2 = encoder.getPosition();
+    settings[5] = reversTime2;
+    if (settings[5] <= 1) {
+      settings[5] = 1;
+      encoder.setPosition(1);
+    } 
+    if (settings[5] >= 100) {
+      settings[5] = 100;
+      encoder.setPosition(100);
+    }
+    displayMenu();
+  }
+ 
+  if (changeReversAttempts2) {
+    reversAttempts2 = encoder.getPosition();
+    settings[6] = reversAttempts2;
+    if (settings[6] <= 1) {
+      settings[6] = 1;
+      encoder.setPosition(1);
+    } 
+    if (settings[6] >= 100) {
+      settings[6] = 100;
+      encoder.setPosition(100);
+    }
+    displayMenu();
+  }
+
+  if (changeOnThrough) {
+    onThrough = encoder.getPosition();
+    if (onThrough <= 1) {
+      onThrough = 1;
+      encoder.setPosition(1);
+    } 
+    if (onThrough >= 100) {
+      onThrough = 100;
+      encoder.setPosition(100);
+    }
+    displayMenu();
+  }
+
+  if (changeMovingTime) {
+    movingTime = encoder.getPosition();
+    if (movingTime <= 1) {
+      movingTime = 1;
+      encoder.setPosition(1);
+    } 
+    if (movingTime >= 100) {
+      movingTime = 100;
+      encoder.setPosition(100);
+    }
+    displayMenu();
+  }
+
+  if (changeMaxTok3) {
+    maxTok3 = encoder.getPosition();
+    if (maxTok3 <= 1) {
+      maxTok3 = 1;
+      encoder.setPosition(1);
+    } 
+    if (maxTok3 >= 100) {
+      maxTok3 = 100;
+      encoder.setPosition(100);
+    }
+    displayMenu();
+  }
+
+  if (changeOn1) {
+    on1 = encoder.getPosition();
+    settings2[0] = on1;
+    if (settings2[0] <= 1) {
+      settings2[0] = 1;
+      encoder.setPosition(1);
+    } 
+    if (settings2[0] >= 100) {
+      settings2[0] = 100;
+      encoder.setPosition(100);
+    }
+    displayMenu();
+  }
+
+  if (changeOn2) {
+    on2 = encoder.getPosition();
+    settings2[1] = on2;
+    if (settings2[1] <= 1) {
+      settings2[1] = 1;
+      encoder.setPosition(1);
+    } 
+    if (settings2[1] >= 100) {
+      settings2[1] = 100;
+      encoder.setPosition(100);
+    }
+    displayMenu();
+  }
+
+  if (changeOn3) {
+    on3 = encoder.getPosition();
+    settings2[2] = on3;
+    if (settings2[2] <= 1) {
+      settings2[2] = 1;
+      encoder.setPosition(1);
+    } 
+    if (settings2[2] >= 100) {
+      settings2[2] = 100;
+      encoder.setPosition(100);
+    }
+    displayMenu();
+  }
+
+  if (changeCleaningTime) {
+    cleaningTime = encoder.getPosition();
+    settings2[3] = cleaningTime;
+    if (settings2[3] <= 1) {
+      settings2[3] = 1;
+      encoder.setPosition(1);
+    } 
+    if (settings2[3] >= 100) {
+      settings2[3] = 100;
+      encoder.setPosition(100);
+    }
+    displayMenu();
+  }
+
+  if (changeMaxTok4) {
+    maxTok4 = encoder.getPosition();
+    settings2[4] = maxTok4;
+    if (settings2[4] <= 1) {
+      settings2[4] = 1;
+      encoder.setPosition(1);
+    } 
+    if (settings2[4] >= 100) {
+      settings2[4] = 100;
+      encoder.setPosition(100);
+    }
+    displayMenu();
+  }
+
+
+
+
+
+}
+// Оновлення першого видимого елементу
+void updateVisibleItems() {
+  if (currentMenu < firstVisibleItem) {
+    firstVisibleItem = currentMenu;
+  } else if (currentMenu >= firstVisibleItem + visibleItemsCount) {
+    firstVisibleItem = currentMenu - visibleItemsCount + 1;
+  }
+}
+
+// Функція для відображення меню
+void displayMenu() {
+  u8g2.clearBuffer();
+  int i = 0;
+  if (inSubMenu == 1) {
+    for (int item = firstVisibleItem; item < min(firstVisibleItem + visibleItemsCount, mainMenuSize); item++) {
+      u8g2.setCursor(0, 10 + i * 12);
+      if (item == currentMenu) {
+        u8g2.print(">");
+      } else {
+        u8g2.print(" ");  // Залишаємо порожній простір для інших рядків
+      }
+      u8g2.print(mainMenu[item]);
+      i++;
+      encoder.tick();
+      newPos = encoder.getPosition();
+    }
+
+  } else if (inSubMenu == 2) {
+    for (int item = firstVisibleItem; item < min(firstVisibleItem + visibleItemsCount, setingMenuSize); item++) {
+      u8g2.setCursor(0, 10 + i * 12);
+      if (item == currentMenu) {
+        u8g2.print(">");
+      } else {
+        u8g2.print(" ");  // Залишаємо порожній простір для інших рядків
+      }
+      u8g2.print(setingMenu[item]);
+      i++;
+      encoder.tick();
+      newPos = encoder.getPosition();
+    }
+  } else if (inSubMenu == 3) {
+    for (int item = firstVisibleItem; item < min(firstVisibleItem + visibleItemsCount, temperaturMenuSize); item++) {
+      u8g2.setCursor(0, 10 + i * 12);
+      if (item == currentMenu) {
+        u8g2.print(">");
+      } else {
+        u8g2.print(" ");  // Залишаємо порожній простір для інших рядків
+      }
+      u8g2.print(temperaturMenu[item]);
+      u8g2.setCursor(100, 22);
+      u8g2.print(temperatur);
+      i++;
+      encoder.tick();
+      newPos = encoder.getPosition();
+    }
+  } else if (inSubMenu == 4) {
+    for (int item = firstVisibleItem; item < min(firstVisibleItem + visibleItemsCount, fanMenuSize); item++) {
+      u8g2.setCursor(0, 10 + i * 12);
+      if (item == currentMenu) {
+        u8g2.print(">");
+      } else {
+        u8g2.print(" ");  // Залишаємо порожній простір для інших рядків
+      }
+      u8g2.print(fanMenu[item]);
+      u8g2.setCursor(100, 22);
+      u8g2.print(maxRound);
+      u8g2.setCursor(100, 34);
+      u8g2.print(minRound);
+      i++;
+      encoder.tick();
+      newPos = encoder.getPosition();
+    }
+  }  else if (inSubMenu == 5) {
+    for (int item = firstVisibleItem; item < min(firstVisibleItem + visibleItemsCount, shnekMenuSize); item++) {
+      u8g2.setCursor(0, 10 + i * 12);
+      if (item == currentMenu) {
+        u8g2.print(">");
+      } else {
+        u8g2.print(" ");  // Залишаємо порожній простір для інших рядків
+      }
+      u8g2.print(shnekMenu[item]);
+      u8g2.setCursor(100, 22);
+      u8g2.print(waitFeed);
+      u8g2.setCursor(100, 34);
+      u8g2.print(maxTok1);
+      u8g2.setCursor(100, 46);
+      u8g2.print(reversTime1);
+      u8g2.setCursor(100, 58);
+      u8g2.print(reversAttempts1);
+      i++;
+      encoder.tick();
+      newPos = encoder.getPosition();
+    }
+  } else if (inSubMenu == 6) {
+    for (int item = firstVisibleItem; item < min(firstVisibleItem + visibleItemsCount, feedMenuSize); item++) {
+      u8g2.setCursor(0, 10 + i * 12);
+      if (item == currentMenu) {
+        u8g2.print(">");
+      } else {
+        u8g2.print(" ");  // Залишаємо порожній простір для інших рядків
+      }
+      u8g2.print(feedMenu[item]);
+    // Встановлюємо курсор для числового значення відповідного пункту, починаючи з другого рядка
+     if (item < (feedMenuSize - 1)) {
+     u8g2.setCursor(100, 22 + i * 12);  // Виводимо число напроти меню
+    u8g2.print(settings[item]);  // Виводимо відповідне число з масиву
+    }     
+      i++;
+      encoder.tick();
+      newPos = encoder.getPosition();
+    }
+  } else if (inSubMenu == 7) {
+    for (int item = firstVisibleItem; item < min(firstVisibleItem + visibleItemsCount, kolosMenuSize); item++) {
+      u8g2.setCursor(0, 10 + i * 12);
+      if (item == currentMenu) {
+        u8g2.print(">");
+      } else {
+        u8g2.print(" ");  // Залишаємо порожній простір для інших рядків
+      }
+      u8g2.print(kolosMenu[item]);
+      u8g2.setCursor(100, 22);
+      u8g2.print(onThrough);
+      u8g2.setCursor(100, 34);
+      u8g2.print(movingTime);
+      u8g2.setCursor(100, 46);
+      u8g2.print(maxTok3);
+      i++;
+      encoder.tick();
+      newPos = encoder.getPosition();
+    }
+  } else if (inSubMenu == 8) {
+    for (int item = firstVisibleItem; item < min(firstVisibleItem + visibleItemsCount, cleaningMenuSize); item++) {
+      u8g2.setCursor(0, 10 + i * 12);
+      if (item == currentMenu) {
+        u8g2.print(">");
+      } else {
+        u8g2.print(" ");  // Залишаємо порожній простір для інших рядків
+      }
+      u8g2.print(cleaningMenu[item]);
+      if (item < (cleaningMenuSize - 1)) {
+        u8g2.setCursor(100, 22 + i * 12);  // Виводимо число напроти меню
+        u8g2.print(settings2[item]);
+      i++;
+      encoder.tick();
+      newPos = encoder.getPosition();
+    }
+  }
+}
+u8g2.sendBuffer();
+}
+// Логіка переходу між підменю
+void handleMenuSelection() {
+  encoder.tick();
+  newPos = encoder.getPosition();
+  if (inSubMenu == 2 && currentMenu == 0) {
+    inSubMenu = 1;  // Повернутись у головне меню з підменю
+    currentMenu = 0; // Встановлюємо стрілку на перший пункт
+    encoder.setPosition(0);  // Синхронізуємо енкодер
+    firstVisibleItem = 0; // Скидаємо початкову позицію прокрутки
+  } else if (inSubMenu == 1 && currentMenu == 1) {
+    inSubMenu = 2;   // Перехід до підменю "Налаштування"
+    currentMenu = 0; // Встановлюємо стрілку на перший пункт
+    encoder.setPosition(0);  // Синхронізуємо енкодер
+    firstVisibleItem = 0; // Скидаємо початкову позицію прокрутки
+  } else if (inSubMenu == 2 && currentMenu == 1) {
+    inSubMenu = 3;   // Перехід до підменю "температура"
+    currentMenu = 0; // Встановлюємо стрілку на перший пункт
+    encoder.setPosition(0);  // Синхронізуємо енкодер 
+    firstVisibleItem = 0; // Скидаємо початкову позицію прокрутки
+  }  else if (inSubMenu == 3 && currentMenu == 0) {
+    inSubMenu = 2;   // Повернутись у меню налаштування
+    currentMenu = 0; // Встановлюємо стрілку на перший пункт 
+    encoder.setPosition(0);  // Синхронізуємо енкодер
+    firstVisibleItem = 0; // Скидаємо початкову позицію прокрутки
+  } else if (inSubMenu == 2 && currentMenu == 2) {
+    inSubMenu = 4;   // Перехід до підменю "Вентилятор"
+    currentMenu = 0; // Встановлюємо стрілку на перший пункт 
+    encoder.setPosition(0);  // Синхронізуємо енкодер
+    firstVisibleItem = 0; // Скидаємо початкову позицію прокрутки
+  }  else if (inSubMenu == 4 && currentMenu == 0) {
+    inSubMenu = 2;   // Повернутись у меню налаштування
+    currentMenu = 0; // Встановлюємо стрілку на перший пункт 
+    encoder.setPosition(0);  // Синхронізуємо енкодер
+    firstVisibleItem = 0; // Скидаємо початкову позицію прокрутки
+  }  else if (inSubMenu == 2 && currentMenu == 3) {
+    inSubMenu = 5;   // Перехід до підменю "шнек"
+    currentMenu = 0; // Встановлюємо стрілку на перший пункт 
+    encoder.setPosition(0);  // Синхронізуємо енкодер
+    firstVisibleItem = 0; // Скидаємо початкову позицію прокрутки
+  }  else if (inSubMenu == 5 && currentMenu == 0) {
+    inSubMenu = 2;   // Повернутись у меню налаштування
+    currentMenu = 0; // Встановлюємо стрілку на перший пункт 
+    encoder.setPosition(0);  // Синхронізуємо енкодер
+    firstVisibleItem = 0; // Скидаємо початкову позицію прокрутки
+  }  else if (inSubMenu == 2 && currentMenu == 4) {
+    inSubMenu = 6;   // Перехід до підменю "подача"
+    currentMenu = 0; // Встановлюємо стрілку на перший пункт 
+    encoder.setPosition(0);  // Синхронізуємо енкодер
+    firstVisibleItem = 0; // Скидаємо початкову позицію прокрутки
+  }  else if (inSubMenu == 6 && currentMenu == 0) {
+    inSubMenu = 2;   // Повернутись у меню налаштування
+    currentMenu = 0; // Встановлюємо стрілку на перший пункт 
+    encoder.setPosition(0);  // Синхронізуємо енкодер
+    firstVisibleItem = 0; // Скидаємо початкову позицію прокрутки
+  }  else if (inSubMenu == 2 && currentMenu == 5) {
+    inSubMenu = 7;   // Перехід до підменю "колоснік"
+    currentMenu = 0; // Встановлюємо стрілку на перший пункт 
+    encoder.setPosition(0);  // Синхронізуємо енкодер
+    firstVisibleItem = 0; // Скидаємо початкову позицію прокрутки
+  }  else if (inSubMenu == 7 && currentMenu == 0) {
+    inSubMenu = 2;   // Повернутись у меню налаштування
+    currentMenu = 0; // Встановлюємо стрілку на перший пункт 
+    encoder.setPosition(0);  // Синхронізуємо енкодер
+    firstVisibleItem = 0; // Скидаємо початкову позицію прокрутки
+  }  else if (inSubMenu == 2 && currentMenu == 6) {
+    inSubMenu = 8;   // Перехід до підменю "чистка теплообміника"
+    currentMenu = 0; // Встановлюємо стрілку на перший пункт 
+    encoder.setPosition(0);  // Синхронізуємо енкодер
+    firstVisibleItem = 0; // Скидаємо початкову позицію прокрутки
+  }  else if (inSubMenu == 8 && currentMenu == 0) {
+    inSubMenu = 2;   // Повернутись у меню налаштування
+    currentMenu = 0; // Встановлюємо стрілку на перший пункт 
+    encoder.setPosition(0);  // Синхронізуємо енкодер
+    firstVisibleItem = 0; // Скидаємо початкову позицію прокрутки
+  } else if (inSubMenu == 4 && currentMenu == 1) {  // Якщо натискаємо на "Макс. оберти"
+      if (!changeMaxRound) {
+        changeMaxRound = true;  // Входимо в режим редагування
+        encoder.setPosition(maxRound);  // Встановлюємо енкодер на значення maxRound
+      } else {
+       saveToEEPROM1();
+        changeMaxRound = false;  // Виходимо з режиму редагування
+        encoder.setPosition(0);  // Скидаємо позицію енкодера
+      }
+    } else if (inSubMenu == 4 && currentMenu == 2) {  // Якщо натискаємо на "мін. оберти"
+      if (!changeMinRound) {
+        changeMinRound = true;  // Входимо в режим редагування
+       // encoder.setPosition(minRound);  // Встановлюємо енкодер на значення maxRound
+      } else {
+       saveToEEPROM2();
+        changeMinRound = false;  // Виходимо з режиму редагування
+        encoder.setPosition(0);  // Скидаємо позицію енкодера
+      }
+    } else if (inSubMenu == 3 && currentMenu == 1) {  // Якщо натискаємо на "температура"
+      if (!changeTemperatur) {
+        changeTemperatur = true;  // Входимо в режим редагування
+        encoder.setPosition(temperatur);  // Встановлюємо енкодер на значення maxRound
+      } else {
+       saveToEEPROM3();
+        changeTemperatur = false;  // Виходимо з режиму редагування
+        encoder.setPosition(0);  // Скидаємо позицію енкодера
+      }
+    } else if (inSubMenu == 5 && currentMenu == 1) {  // Якщо натискаємо на ""
+      if (!changeWaitFeed) {
+        changeWaitFeed = true;  // Входимо в режим редагування
+        encoder.setPosition(waitFeed);  // Встановлюємо енкодер на значення maxRound
+      } else {
+       saveToEEPROM4();
+        changeWaitFeed = false;  // Виходимо з режиму редагування
+        encoder.setPosition(0);  // Скидаємо позицію енкодера
+      }
+    } else if (inSubMenu == 5 && currentMenu == 2) {  // Якщо натискаємо на ""
+      if (!changeMaxTok1) {
+        changeMaxTok1 = true;  // Входимо в режим редагування
+        encoder.setPosition(maxTok1);  // Встановлюємо енкодер на значення maxRound
+      } else {
+        saveToEEPROM5();
+        changeMaxTok1 = false;  // Виходимо з режиму редагування
+        encoder.setPosition(0);  // Скидаємо позицію енкодера
+      }
+    } else if (inSubMenu == 5 && currentMenu == 3) {  // Якщо натискаємо на ""
+      if (!changeReversTime1) {
+        changeReversTime1 = true;  // Входимо в режим редагування
+        encoder.setPosition(reversTime1);  // Встановлюємо енкодер на значення maxRound
+      } else {
+      saveToEEPROM6();
+        changeReversTime1 = false;  // Виходимо з режиму редагування
+        encoder.setPosition(0);  // Скидаємо позицію енкодера
+      }
+    } else if (inSubMenu == 5 && currentMenu == 4) {  // Якщо натискаємо на ""
+      if (!changeReversAttempts1) {
+        changeReversAttempts1 = true;  // Входимо в режим редагування
+        encoder.setPosition(reversAttempts1);  // Встановлюємо енкодер на значення maxRound
+      } else {
+        saveToEEPROM7();
+        changeReversAttempts1 = false;  // Виходимо з режиму редагування
+        encoder.setPosition(0);  // Скидаємо позицію енкодера
+      }
+    } else if (inSubMenu == 6 && currentMenu == 1) {  // Якщо натискаємо на ""
+      if (!changeFitilTime) {
+        changeFitilTime = true;  // Входимо в режим редагування
+        encoder.setPosition(settings[0]);  // Встановлюємо енкодер на значення maxRound
+      } else {
+        saveToEEPROM11();
+        changeFitilTime = false;  // Виходимо з режиму редагування
+        encoder.setPosition(0);  // Скидаємо позицію енкодера
+      }
+    } else if (inSubMenu == 6 && currentMenu == 2) {  // Якщо натискаємо на ""
+      if (!changeFitilWaitTime) {
+        changeFitilWaitTime = true;  // Входимо в режим редагування
+        encoder.setPosition(settings[1]);  // Встановлюємо енкодер на значення maxRound
+      } else {
+       saveToEEPROM11();
+        changeFitilWaitTime = false;  // Виходимо з режиму редагування
+        encoder.setPosition(0);  // Скидаємо позицію енкодера
+      }
+    } else if (inSubMenu == 6 && currentMenu == 3) {  // Якщо натискаємо на ""
+      if (!changeFeedTime) {
+        changeFeedTime = true;  // Входимо в режим редагування
+        encoder.setPosition(settings[2]);  // Встановлюємо енкодер на значення maxRound
+      } else {
+        saveToEEPROM11();
+        changeFeedTime = false;  // Виходимо з режиму редагування
+        encoder.setPosition(0);  // Скидаємо позицію енкодера
+      }
+    } else if (inSubMenu == 6 && currentMenu == 4) {  // Якщо натискаємо на ""
+      if (!changeWaitFeedTime) {
+        changeWaitFeedTime = true;  // Входимо в режим редагування
+        encoder.setPosition(settings[3]);  // Встановлюємо енкодер на значення maxRound
+      } else {
+       saveToEEPROM11();
+        changeWaitFeedTime = false;  // Виходимо з режиму редагування
+        encoder.setPosition(0);  // Скидаємо позицію енкодера
+      }
+    } else if (inSubMenu == 6 && currentMenu == 5) {  // Якщо натискаємо на ""
+      if (!changeMaxTok2) {
+        changeMaxTok2 = true;  // Входимо в режим редагування
+        encoder.setPosition(settings[4]);  // Встановлюємо енкодер на значення maxRound
+      } else {
+       saveToEEPROM11();
+        changeMaxTok2 = false;  // Виходимо з режиму редагування
+        encoder.setPosition(0);  // Скидаємо позицію енкодера
+      }
+    } else if (inSubMenu == 6 && currentMenu == 6) {  // Якщо натискаємо на ""
+      if (!changeReversTime2) {
+        changeReversTime2 = true;  // Входимо в режим редагування
+        encoder.setPosition(settings[5]);  // Встановлюємо енкодер на значення maxRound
+      } else {
+       saveToEEPROM11();
+        changeReversTime2 = false;  // Виходимо з режиму редагування
+        encoder.setPosition(0);  // Скидаємо позицію енкодера
+      }
+    } else if (inSubMenu == 6 && currentMenu == 7) {  // Якщо натискаємо на ""
+      if (!changeReversAttempts2) {
+        changeReversAttempts2 = true;  // Входимо в режим редагування
+        encoder.setPosition(settings[6]);  // Встановлюємо енкодер на значення maxRound
+      } else {
+      saveToEEPROM11();
+        changeReversAttempts2 = false;  // Виходимо з режиму редагування
+        encoder.setPosition(0);  // Скидаємо позицію енкодера
+      }
+    } else if (inSubMenu == 7 && currentMenu == 1) {  // Якщо натискаємо на ""
+      if (!changeOnThrough) {
+        changeOnThrough = true;  // Входимо в режим редагування
+        encoder.setPosition(onThrough);  // Встановлюємо енкодер на значення maxRound
+      } else {
+      saveToEEPROM12();
+        changeOnThrough = false;  // Виходимо з режиму редагування
+        encoder.setPosition(0);  // Скидаємо позицію енкодера
+      }
+    } else if (inSubMenu == 7 && currentMenu == 2) {  // Якщо натискаємо на ""
+      if (!changeMovingTime) {
+        changeMovingTime = true;  // Входимо в режим редагування
+        encoder.setPosition(movingTime);  // Встановлюємо енкодер на значення maxRound
+      } else {
+       saveToEEPROM13();
+        changeMovingTime = false;  // Виходимо з режиму редагування
+        encoder.setPosition(0);  // Скидаємо позицію енкодера
+      }
+    } else if (inSubMenu == 7 && currentMenu == 3) {  // Якщо натискаємо на ""
+      if (!changeMaxTok3) {
+        changeMaxTok3 = true;  // Входимо в режим редагування
+        encoder.setPosition(maxTok3);  // Встановлюємо енкодер на значення maxRound
+      } else {
+       saveToEEPROM14();
+        changeMaxTok3 = false;  // Виходимо з режиму редагування
+        encoder.setPosition(0);  // Скидаємо позицію енкодера
+      }
+    } else if (inSubMenu == 8 && currentMenu == 1) {  // Якщо натискаємо на ""
+      if (!changeOn1) {
+        changeOn1 = true;  // Входимо в режим редагування
+        encoder.setPosition(settings2[0]);  // Встановлюємо енкодер на значення maxRound
+      } else {
+       saveToEEPROM15();
+        changeOn1 = false;  // Виходимо з режиму редагування
+        encoder.setPosition(0);  // Скидаємо позицію енкодера
+      }
+    } else if (inSubMenu == 8 && currentMenu == 2) {  // Якщо натискаємо на ""
+      if (!changeOn2) {
+        changeOn2 = true;  // Входимо в режим редагування
+        encoder.setPosition(settings2[1]);  // Встановлюємо енкодер на значення maxRound
+      } else {
+       saveToEEPROM15();
+        changeOn2 = false;  // Виходимо з режиму редагування
+        encoder.setPosition(0);  // Скидаємо позицію енкодера
+      }
+    } else if (inSubMenu == 8 && currentMenu == 3) {  // Якщо натискаємо на ""
+      if (!changeOn3) {
+        changeOn3 = true;  // Входимо в режим редагування
+        encoder.setPosition(settings2[2]);  // Встановлюємо енкодер на значення maxRound
+      } else {
+       saveToEEPROM15();
+        changeOn3 = false;  // Виходимо з режиму редагування
+        encoder.setPosition(0);  // Скидаємо позицію енкодера
+      }
+    } else if (inSubMenu == 8 && currentMenu == 4) {  // Якщо натискаємо на ""
+      if (!changeCleaningTime) {
+        changeCleaningTime = true;  // Входимо в режим редагування
+        encoder.setPosition(settings2[3]);  // Встановлюємо енкодер на значення maxRound
+      } else {
+        saveToEEPROM15();
+        changeCleaningTime = false;  // Виходимо з режиму редагування
+        encoder.setPosition(0);  // Скидаємо позицію енкодера
+      }
+    } else if (inSubMenu == 8 && currentMenu == 5) {  // Якщо натискаємо на ""
+      if (!changeMaxTok4) {
+        changeMaxTok4 = true;  // Входимо в режим редагування
+        encoder.setPosition(settings2[4]);  // Встановлюємо енкодер на значення maxRound
+      } else {
+       saveToEEPROM15();
+        changeMaxTok4 = false;  // Виходимо з режиму редагування
+        encoder.setPosition(0);  // Скидаємо позицію енкодера
+      }
+    }
+}
+
+void saveToEEPROM1() {
+  EEPROM.put(address1, maxRound);  // Записуємо значення maxTok3 в EEPROM
+}
+void saveToEEPROM2() {
+  EEPROM.put(address2, minRound);  // Записуємо значення maxTok3 в EEPROM
+}
+void saveToEEPROM3() {
+  EEPROM.put(address3, temperatur);  // Записуємо значення maxTok3 в EEPROM
+}
+void saveToEEPROM4() {
+  EEPROM.put(address4, waitFeed);  // Записуємо значення maxTok3 в EEPROM
+}
+void saveToEEPROM5() {
+  EEPROM.put(address5, maxTok1);  // Записуємо значення maxTok3 в EEPROM
+}
+void saveToEEPROM6() {
+  EEPROM.put(address6, reversTime1);  // Записуємо значення maxTok3 в EEPROM
+}
+void saveToEEPROM7() {
+  EEPROM.put(address7, reversAttempts1);  // Записуємо значення maxTok3 в EEPROM
+}
+void saveToEEPROM11() {
+  for (int i = 0; i < 7; i++) {
+    EEPROM.put(eepromAddress1 + i * 3, settings[i]);  // Записуємо кожен елемент масиву
+  }
+}
+void saveToEEPROM12() {
+  EEPROM.put(address11, onThrough);  // Записуємо значення maxTok3 в EEPROM
+}
+void saveToEEPROM13() {
+  EEPROM.put(address12, movingTime);  // Записуємо значення maxTok3 в EEPROM
+}
+void saveToEEPROM14() {
+  EEPROM.put(address13, maxTok3);  // Записуємо значення maxTok3 в EEPROM
+}
+void saveToEEPROM15() {
+  for (int i = 0; i < 5; i++) {
+    EEPROM.put(eepromAddress2 + i * 3, settings2[i]);  // Записуємо кожен елемент масиву
+  }
+}
+
+void loadFromEEPROM() {
+EEPROM.get(address1, maxRound);  // Зчитуємо значення maxTok3 з EEPROM
+EEPROM.get(address2, minRound);  // Записуємо значення maxTok3 в EEPROM
+EEPROM.get(address3, temperatur);  // Записуємо значення maxTok3 в EEPROM
+EEPROM.get(address4, waitFeed);  // Записуємо значення maxTok3 в EEPROM
+EEPROM.get(address5, maxTok1);  // Записуємо значення maxTok3 в EEPROM
+EEPROM.get(address6, reversTime1);  // Записуємо значення maxTok3 в EEPROM
+EEPROM.get(address7, reversAttempts1);  // Записуємо значення maxTok3 в EEPROM
+for (int i = 0; i < 7; i++) {
+  EEPROM.get(eepromAddress1 + i * 3, settings[i]);  // Записуємо кожен елемент масиву
+}
+EEPROM.get(address11, onThrough);  // Записуємо значення maxTok3 в EEPROM
+EEPROM.get(address12, movingTime);  // Записуємо значення maxTok3 в EEPROM
+EEPROM.get(address13, maxTok3);  // Записуємо значення maxTok3 в EEPROM
+for (int i = 0; i < 5; i++) {
+  EEPROM.get(eepromAddress2 + i * 3, settings2[i]);  // Записуємо кожен елемент масиву
+}
+}
+
+
+
